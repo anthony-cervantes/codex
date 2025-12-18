@@ -16,6 +16,7 @@
 use crate::config::Config;
 use crate::skills::SkillMetadata;
 use crate::skills::render_skills_section;
+use crate::steering::load_steering_docs;
 use dunce::canonicalize as normalize_path;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
@@ -38,15 +39,29 @@ pub(crate) async fn get_user_instructions(
 ) -> Option<String> {
     let skills_section = skills.and_then(render_skills_section);
 
+    let steering_docs = match load_steering_docs(config).await {
+        Ok(res) => res.combined,
+        Err(e) => {
+            error!("error trying to load steering docs: {e:#}");
+            None
+        }
+    };
+
     let project_docs = match read_project_docs(config).await {
         Ok(docs) => docs,
         Err(e) => {
             error!("error trying to find project doc: {e:#}");
-            return config.user_instructions.clone();
+            None
         }
     };
 
     let combined_project_docs = merge_project_docs_with_skills(project_docs, skills_section);
+    let combined_project_docs = match (steering_docs, combined_project_docs) {
+        (Some(steering), Some(project_docs)) => Some(format!("{steering}\n\n{project_docs}")),
+        (Some(steering), None) => Some(steering),
+        (None, Some(project_docs)) => Some(project_docs),
+        (None, None) => None,
+    };
 
     let mut parts: Vec<String> = Vec::new();
 

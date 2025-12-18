@@ -194,6 +194,18 @@ project_doc_max_bytes = 32768
 project_doc_fallback_filenames = []
 
 ################################################################################
+# Steering Files
+################################################################################
+
+[steering]
+# Enable steering file injection. Default: true
+enabled = true
+
+# Max bytes to include from steering files. When unset, defaults to the same value
+# as `project_doc_max_bytes`.
+doc_max_bytes = 32768
+
+################################################################################
 # Tools (legacy toggles kept for compatibility)
 ################################################################################
 

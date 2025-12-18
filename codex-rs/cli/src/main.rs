@@ -67,6 +67,10 @@ struct MultitoolCli {
     #[clap(flatten)]
     pub feature_toggles: FeatureToggles,
 
+    /// Disable steering file injection.
+    #[arg(long = "no-steering", default_value_t = false, global = true)]
+    pub no_steering: bool,
+
     #[clap(flatten)]
     interactive: TuiCli,
 
@@ -130,6 +134,24 @@ enum Subcommand {
 
     /// Inspect feature flags.
     Features(FeaturesCli),
+
+    /// Inspect steering files and discovery decisions.
+    Steering(SteeringArgs),
+}
+
+#[derive(Debug, Parser)]
+struct SteeringArgs {
+    #[command(subcommand)]
+    cmd: SteeringCommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum SteeringCommand {
+    /// List discovered steering files in load order.
+    List,
+
+    /// Explain steering discovery and truncation decisions.
+    Doctor,
 }
 
 #[derive(Debug, Parser)]
@@ -436,6 +458,7 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
     let MultitoolCli {
         config_overrides: mut root_config_overrides,
         feature_toggles,
+        no_steering,
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
@@ -443,6 +466,11 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
     root_config_overrides.raw_overrides.extend(toggle_overrides);
+    if no_steering {
+        root_config_overrides
+            .raw_overrides
+            .push("steering.enabled=false".to_string());
+    }
 
     match subcommand {
         None => {
@@ -644,9 +672,130 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 }
             }
         },
+        Some(Subcommand::Steering(SteeringArgs { cmd })) => {
+            let cli_kv_overrides = root_config_overrides
+                .parse_overrides()
+                .map_err(anyhow::Error::msg)?;
+            let overrides = ConfigOverrides {
+                config_profile: interactive.config_profile.clone(),
+                cwd: interactive.cwd.clone(),
+                ..Default::default()
+            };
+            let config =
+                Config::load_with_cli_overrides_and_harness_overrides(cli_kv_overrides, overrides)
+                    .await?;
+
+            match cmd {
+                SteeringCommand::List => steering_list(&config).await?,
+                SteeringCommand::Doctor => steering_doctor(&config).await?,
+            }
+        }
     }
 
     Ok(())
+}
+
+async fn steering_list(config: &Config) -> anyhow::Result<()> {
+    let result = codex_core::steering::load_steering_docs(config).await?;
+    if result.discovery.files.is_empty() {
+        println!("No steering files discovered.");
+        return Ok(());
+    }
+
+    for (idx, file) in result.files.iter().enumerate() {
+        let n = idx + 1;
+        match &file.status {
+            codex_core::steering::SteeringFileStatus::Included { truncated, .. } => {
+                let truncated = truncated.then_some(" truncated").unwrap_or("");
+                println!(
+                    "{n}. {} included{truncated}: {}",
+                    file.scope.as_str(),
+                    file.display_path
+                );
+            }
+            codex_core::steering::SteeringFileStatus::Omitted { reason } => {
+                println!(
+                    "{n}. {} omitted ({}): {}",
+                    file.scope.as_str(),
+                    reason.as_str(),
+                    file.display_path
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn steering_doctor(config: &Config) -> anyhow::Result<()> {
+    let result = codex_core::steering::load_steering_docs(config).await?;
+
+    println!("CODEX_HOME: {}", result.discovery.codex_home.display());
+    println!("Repo root: {}", result.discovery.repo_root.display());
+    println!("Steering enabled: {}", result.enabled);
+    println!("Steering doc max bytes: {}", result.max_bytes);
+    println!(
+        "Global dir: {} ({})",
+        result.discovery.global_dir.display(),
+        format_dir_state(&result.discovery.global_dir_state)
+    );
+    println!(
+        "Project dir: {} ({})",
+        result.discovery.project_dir.display(),
+        format_dir_state(&result.discovery.project_dir_state)
+    );
+
+    if result.files.is_empty() {
+        println!("No steering files discovered.");
+        return Ok(());
+    }
+
+    let mut empty = 0usize;
+    let mut non_utf8 = 0usize;
+    let mut io_error = 0usize;
+    let mut over_budget = 0usize;
+    let mut truncated = 0usize;
+
+    for file in &result.files {
+        match &file.status {
+            codex_core::steering::SteeringFileStatus::Included { truncated: t, .. } => {
+                truncated += usize::from(*t);
+            }
+            codex_core::steering::SteeringFileStatus::Omitted { reason } => match reason {
+                codex_core::steering::OmissionReason::Empty => empty += 1,
+                codex_core::steering::OmissionReason::NonUtf8 => non_utf8 += 1,
+                codex_core::steering::OmissionReason::OverBudget => over_budget += 1,
+                codex_core::steering::OmissionReason::Io(_) => io_error += 1,
+                codex_core::steering::OmissionReason::Disabled => {}
+            },
+        }
+    }
+
+    if empty > 0 {
+        println!("Ignored empty file(s): {empty}");
+    }
+    if non_utf8 > 0 {
+        println!("Ignored non-UTF8 file(s): {non_utf8}");
+    }
+    if io_error > 0 {
+        println!("Ignored unreadable file(s): {io_error}");
+    }
+    if truncated > 0 {
+        println!("Truncated file(s): {truncated}");
+    }
+    if over_budget > 0 {
+        println!("Omitted over-budget file(s): {over_budget}");
+    }
+
+    Ok(())
+}
+
+fn format_dir_state(state: &codex_core::steering::DirState) -> String {
+    match state {
+        codex_core::steering::DirState::Missing => "missing".to_string(),
+        codex_core::steering::DirState::Present => "present".to_string(),
+        codex_core::steering::DirState::Error(msg) => format!("error: {msg}"),
+    }
 }
 
 /// Prepend root-level overrides so they have lower precedence than
@@ -787,6 +936,7 @@ mod tests {
             interactive,
             config_overrides: root_overrides,
             subcommand,
+            no_steering: _,
             feature_toggles: _,
         } = cli;
 

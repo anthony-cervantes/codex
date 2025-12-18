@@ -3188,6 +3188,48 @@ mod tests {
         (session, turn_context)
     }
 
+    #[tokio::test]
+    async fn steering_is_injected_into_initial_context() {
+        let codex_home = tempfile::tempdir().expect("codex home");
+        let repo = tempfile::tempdir().expect("repo");
+        std::fs::write(repo.path().join(".git"), "gitdir: /tmp/fake\n").unwrap();
+        let steering_dir = repo.path().join(".codex/steering");
+        std::fs::create_dir_all(&steering_dir).unwrap();
+        std::fs::write(steering_dir.join("01.md"), "steer me").unwrap();
+
+        let mut config = Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            codex_home.path().to_path_buf(),
+        )
+        .expect("load config");
+        config.cwd = repo.path().to_path_buf();
+
+        let instructions = crate::project_doc::get_user_instructions(&config, None)
+            .await
+            .expect("instructions");
+
+        let (session, mut turn_context) = make_session_and_context();
+        turn_context.cwd = config.cwd.clone();
+        turn_context.user_instructions = Some(instructions);
+
+        let items = session.build_initial_context(&turn_context);
+        let (role, text) = match items.first() {
+            Some(codex_protocol::models::ResponseItem::Message { role, content, .. }) => {
+                let [codex_protocol::models::ContentItem::InputText { text }] = content.as_slice()
+                else {
+                    panic!("expected one InputText content item");
+                };
+                (role.as_str(), text.as_str())
+            }
+            other => panic!("expected first item to be a Message, got {other:?}"),
+        };
+
+        assert_eq!(role, "user");
+        assert!(text.contains("[Steering: scope=project file=.codex/steering/01.md]"));
+        assert!(text.contains("steer me"));
+    }
+
     // Like make_session_and_context, but returns Arc<Session> and the event receiver
     // so tests can assert on emitted events.
     pub(crate) fn make_session_and_context_with_rx() -> (

@@ -868,6 +868,20 @@ We recommend migrating instructions to AGENTS.md; other filenames may reduce mod
 
 > See also [AGENTS.md discovery](./agents_md.md) for how Codex locates these files during a session.
 
+### steering
+
+Steering files are optional Markdown documents that Codex injects into the prompt context on every run. See [Steering files](./steering.md) for details and precedence rules.
+
+```toml
+[steering]
+# Enable steering file injection (default: true).
+enabled = true
+
+# Max bytes to include from steering files. When unset, defaults to the same value
+# as `project_doc_max_bytes`.
+doc_max_bytes = 32768
+```
+
 ### tui
 
 Options that are specific to the TUI.
@@ -968,6 +982,8 @@ Valid values:
 | `model_providers.<id>.stream_max_retries`        | number                                                            | SSE stream retry count (default: 5).                                                                                            |
 | `model_providers.<id>.stream_idle_timeout_ms`    | number                                                            | SSE idle timeout (ms) (default: 300000).                                                                                        |
 | `project_doc_max_bytes`                          | number                                                            | Max bytes to read from `AGENTS.md`.                                                                                             |
+| `steering.enabled`                               | boolean                                                           | Enable steering file injection (default: true).                                                                                 |
+| `steering.doc_max_bytes`                         | number                                                            | Max bytes to include from steering files (default: `project_doc_max_bytes`).                                                    |
 | `profile`                                        | string                                                            | Active profile name.                                                                                                            |
 | `profiles.<name>.*`                              | various                                                           | Profile‑scoped overrides of the same keys.                                                                                      |
 | `history.persistence`                            | `save-all` \| `none`                                              | History file persistence (default: `save-all`).                                                                                 |

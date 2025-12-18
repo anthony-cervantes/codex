@@ -21,6 +21,12 @@ When you work inside a project, Codex builds on those global instructions by col
 
 Before Codex gets to work, the instructions are ingested in precedence order: global guidance from `~/.codex` comes first, then each project doc from the repository root down to your current directory. Guidance in deeper directories overrides earlier layers, so the most specific file controls the final behavior.
 
+## Steering Files
+
+In addition to `AGENTS.md`, Codex can load “steering files”: `*.md` documents that live in `$CODEX_HOME/steering/` and `<repo_root>/.codex/steering/`. Steering files are injected into the same instruction chain and are placed between global `AGENTS.md` and project `AGENTS.md` so project instructions remain the highest-priority layer.
+
+See [Steering files](./steering.md) for locations, ordering rules, size caps, and CLI tooling.
+
 ### Priority Summary
 
 1. Global `AGENTS.override.md` (if present), otherwise global `AGENTS.md`.

@@ -210,6 +210,12 @@ pub struct Config {
     /// Additional filenames to try when looking for project-level docs.
     pub project_doc_fallback_filenames: Vec<String>,
 
+    /// When true, steering files are discovered and injected into the prompt context.
+    pub steering_enabled: bool,
+
+    /// Maximum number of bytes to include from steering files.
+    pub steering_doc_max_bytes: usize,
+
     // todo(aibrahim): this should be used in the override model family
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
@@ -679,6 +685,9 @@ pub struct ConfigToml {
     /// Ordered list of fallback filenames to look for when AGENTS.md is missing.
     pub project_doc_fallback_filenames: Option<Vec<String>>,
 
+    /// Steering file settings.
+    pub steering: Option<SteeringToml>,
+
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
 
@@ -835,6 +844,15 @@ pub struct GhostSnapshotToml {
     pub ignore_large_untracked_dirs: Option<i64>,
     /// Disable all ghost snapshot warning events.
     pub disable_warnings: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct SteeringToml {
+    /// When true, steering files are discovered and injected into the prompt context.
+    pub enabled: Option<bool>,
+    /// Maximum number of bytes to include from steering files.
+    #[serde(alias = "max_bytes")]
+    pub doc_max_bytes: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1242,6 +1260,18 @@ impl Config {
             .set(approval_policy)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{e}")))?;
 
+        let project_doc_max_bytes = cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES);
+        let steering_enabled = cfg
+            .steering
+            .as_ref()
+            .and_then(|s| s.enabled)
+            .unwrap_or(true);
+        let steering_doc_max_bytes = cfg
+            .steering
+            .as_ref()
+            .and_then(|s| s.doc_max_bytes)
+            .unwrap_or(project_doc_max_bytes);
+
         let config = Self {
             model,
             review_model,
@@ -1268,7 +1298,7 @@ impl Config {
             // is important in code to differentiate the mode from the store implementation.
             mcp_oauth_credentials_store_mode: cfg.mcp_oauth_credentials_store.unwrap_or_default(),
             model_providers,
-            project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
+            project_doc_max_bytes,
             project_doc_fallback_filenames: cfg
                 .project_doc_fallback_filenames
                 .unwrap_or_default()
@@ -1282,6 +1312,8 @@ impl Config {
                     }
                 })
                 .collect(),
+            steering_enabled,
+            steering_doc_max_bytes,
             tool_output_token_limit: cfg.tool_output_token_limit,
             codex_home,
             history,
@@ -3062,6 +3094,8 @@ model_verbosity = "high"
                 model_providers: fixture.model_provider_map.clone(),
                 project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
                 project_doc_fallback_filenames: Vec::new(),
+                steering_enabled: true,
+                steering_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
                 tool_output_token_limit: None,
                 codex_home: fixture.codex_home(),
                 history: History::default(),
@@ -3137,6 +3171,8 @@ model_verbosity = "high"
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
+            steering_enabled: true,
+            steering_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             tool_output_token_limit: None,
             codex_home: fixture.codex_home(),
             history: History::default(),
@@ -3227,6 +3263,8 @@ model_verbosity = "high"
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
+            steering_enabled: true,
+            steering_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             tool_output_token_limit: None,
             codex_home: fixture.codex_home(),
             history: History::default(),
@@ -3303,6 +3341,8 @@ model_verbosity = "high"
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
+            steering_enabled: true,
+            steering_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             tool_output_token_limit: None,
             codex_home: fixture.codex_home(),
             history: History::default(),
